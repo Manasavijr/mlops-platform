@@ -25,7 +25,7 @@ class DriftDetector:
         drift_detected = p_value < settings.DRIFT_THRESHOLD
         report = DriftReport(feature="prediction_score", statistic=round(float(ks_stat), 4), p_value=round(float(p_value), 4), drift_detected=drift_detected, threshold=settings.DRIFT_THRESHOLD)
         response = DriftCheckResponse(drift_detected=drift_detected, reports=[report], sample_size=len(current_scores))
-        self.history.append({"timestamp": datetime.utcnow().isoformat(), "drift_detected": drift_detected, "ks_stat": report.statistic, "p_value": report.p_value, "sample_size": len(current_scores)})
+        self.history.append({"timestamp": datetime.utcnow().isoformat(), "drift_detected": bool(drift_detected), "ks_stat": report.statistic, "p_value": report.p_value, "sample_size": len(current_scores)})
         if drift_detected:
             logger.warning(f"Drift detected! KS={ks_stat:.4f} p={p_value:.4f}")
         return response
