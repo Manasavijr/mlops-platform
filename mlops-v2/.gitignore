@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+mlruns/
+mlartifacts/
+mlflow.db
+.pytest_cache/
+.coverage
+htmlcov/
+data/raw/*.csv
+*.log
+*.jsonl
+.DS_Store
+/tmp/
