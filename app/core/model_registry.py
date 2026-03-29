@@ -1,11 +1,16 @@
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import mlflow, mlflow.pyfunc, torch
+
+import mlflow
+import mlflow.pyfunc
+import torch
 from transformers import pipeline
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
 
 class ModelRegistry:
     def __init__(self):
@@ -27,13 +32,13 @@ class ModelRegistry:
 
     async def _load_from_mlflow(self) -> None:
         client = mlflow.tracking.MlflowClient()
-        versions = client.get_latest_versions(self.model_name, stages=[settings.MLFLOW_MODEL_STAGE])
-        if not versions:
-            raise ValueError(f"No '{settings.MLFLOW_MODEL_STAGE}' version for '{self.model_name}'")
-        mv = versions[0]
+        versions = client.search_model_versions(f"name='{self.model_name}'")
+        prod = [v for v in versions if v.current_stage == "Production"]
+        if not prod:
+            raise ValueError(f"No Production version found for '{self.model_name}'")
+        mv = prod[0]
         self.model_version = mv.version
-        self.model_uri = f"models:/{self.model_name}/{settings.MLFLOW_MODEL_STAGE}"
-        logger.info(f"Loading MLflow model: {self.model_uri}")
+        self.model_uri = f"models:/{self.model_name}/Production"
         self.model = mlflow.pyfunc.load_model(self.model_uri)
         logger.info(f"MLflow model loaded (version {self.model_version})")
 
@@ -42,9 +47,10 @@ class ModelRegistry:
         logger.info(f"Loading HuggingFace model: {hf_model}")
         device = 0 if torch.cuda.is_available() else -1
         self.pipeline = pipeline(
-            "text-classification", model=hf_model, tokenizer=hf_model,
-            device=device, max_length=settings.MAX_SEQUENCE_LENGTH,
-            truncation=True, cache_dir=str(self._cache_dir),
+            "text-classification",
+            model=hf_model,
+            tokenizer=hf_model,
+            device=device,
         )
         self.model_version = "hf-fallback"
         self.model_name = hf_model
@@ -55,18 +61,26 @@ class ModelRegistry:
             raise RuntimeError("Model not loaded.")
         results = []
         if self.pipeline is not None:
-            raw = self.pipeline(texts, batch_size=settings.INFERENCE_BATCH_SIZE)
+            raw = self.pipeline(
+                texts,
+                truncation=True,
+                max_length=settings.MAX_SEQUENCE_LENGTH,
+                batch_size=settings.INFERENCE_BATCH_SIZE,
+            )
             for text, pred in zip(texts, raw):
-                results.append({"text": text, "label": pred["label"].lower(), "score": round(float(pred["score"]), 4), "model_version": self.model_version})
+                results.append({
+                    "text": text,
+                    "label": pred["label"].lower(),
+                    "score": round(float(pred["score"]), 4),
+                    "model_version": self.model_version,
+                })
         elif self.model is not None:
             import pandas as pd
-            df = pd.DataFrame({"text": texts})
-            preds = self.model.predict(df)
+            preds = self.model.predict(pd.DataFrame({"text": texts}))
             for text, pred in zip(texts, preds):
-                if isinstance(pred, dict):
-                    results.append({"text": text, "label": pred.get("label", "unknown"), "score": round(float(pred.get("score", 0.0)), 4), "model_version": self.model_version})
-                else:
-                    results.append({"text": text, "label": str(pred), "score": 1.0, "model_version": self.model_version})
+                label = pred.get("label", str(pred)) if isinstance(pred, dict) else str(pred)
+                score = pred.get("score", 1.0) if isinstance(pred, dict) else 1.0
+                results.append({"text": text, "label": label, "score": round(float(score), 4), "model_version": self.model_version})
         return results
 
     @property

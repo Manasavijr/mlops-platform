@@ -10,10 +10,17 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /build/wheels /wheels
 RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/*.whl && rm -rf /wheels
+
+# Pre-download model at build time so startup is instant
+RUN python -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification; \
+    AutoTokenizer.from_pretrained('distilbert-base-uncased-finetuned-sst-2-english', cache_dir='/tmp/hf_cache'); \
+    AutoModelForSequenceClassification.from_pretrained('distilbert-base-uncased-finetuned-sst-2-english', cache_dir='/tmp/hf_cache'); \
+    print('Model pre-downloaded')"
+
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser ml/ ./ml/
 COPY --chown=appuser:appuser data/ ./data/
-RUN mkdir -p /tmp/model_cache /tmp/hf_cache && chown -R appuser:appuser /tmp/model_cache /tmp/hf_cache
+RUN chown -R appuser:appuser /tmp/hf_cache
 USER appuser
 ENV PORT=8080 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TRANSFORMERS_CACHE=/tmp/hf_cache HF_HOME=/tmp/hf_cache
 EXPOSE 8080
